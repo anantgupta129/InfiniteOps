@@ -1,5 +1,6 @@
 import bz2
 import gzip
+import logging
 import lzma
 import os
 import os.path
@@ -7,9 +8,10 @@ import pathlib
 import shutil
 import tarfile
 import zipfile
-from typing import IO, Any, Callable, Dict, Optional, Tuple
 from pathlib import Path
+from typing import IO, Any, Callable, Dict, Optional, Tuple
 
+from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
 
 
@@ -169,3 +171,17 @@ def write_dataset(image_paths, output_dir):
     for img_path in tqdm(image_paths):
         Path(output_dir / img_path.parent.stem).mkdir(parents=True, exist_ok=True)
         shutil.move(img_path, output_dir / img_path.parent.stem / img_path.name)
+
+
+def get_pylogger(name=__name__) -> logging.Logger:
+    """Initializes multi-GPU-friendly python command line logger."""
+
+    logger = logging.getLogger(name)
+
+    # this ensures all logging levels get marked with the rank zero decorator
+    # otherwise logs would get multiplied for each GPU process in multi-GPU setup
+    logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")
+    for level in logging_levels:
+        setattr(logger, level, rank_zero_only(getattr(logger, level)))
+
+    return logger
