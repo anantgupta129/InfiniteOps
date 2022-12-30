@@ -1,58 +1,74 @@
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-import os
-import torch
-import timm
-
 import pytorch_lightning as pl
+import timm
+import torch
 import torch.nn.functional as F
-
-from pathlib import Path
-from torchmetrics.functional import accuracy
+from torchmetrics.classification.accuracy import Accuracy
 
 
 class LitModule(pl.LightningModule):
-    def __init__(self, model_name: str, num_classes: int = 10, lr: float=0.05):
+    def __init__(
+        self,
+        model_name: str,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler,
+        num_classes: int = 10,
+    ):
         super().__init__()
 
         self.save_hyperparameters()
         self.num_classes = num_classes
-        self.model = timm.create_model(model_name, pretrained=True, num_classes=num_classes)
+        self.model = timm.create_model(
+            model_name, pretrained=True, num_classes=num_classes
+        )
+
+        # accuracy
+        self.acc = Accuracy(task="multiclass", num_classes=num_classes)
+        # loss function
+        self.criterion = torch.nn.CrossEntropyLoss()
 
     def forward(self, x):
         out = self.model(x)
-        return F.log_softmax(out, dim=1)
+        return out
 
-    def training_step(self, batch, batch_idx):
+    def model_step(self, batch, stage=None):
         x, y = batch
         logits = self(x)
-        loss = F.nll_loss(logits, y)
-        self.log("train_loss", loss)
-        return loss
-
-    def evaluate(self, batch, stage=None):
-        x, y = batch
-        logits = self(x)
-        loss = F.nll_loss(logits, y)
+        loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
-        acc = accuracy(preds, y, task="multiclass", num_classes=self.num_classes)
+        acc = self.acc(preds, y)
 
         if stage:
             self.log(f"{stage}/loss", loss, prog_bar=True)
             self.log(f"{stage}/acc", acc, prog_bar=True)
 
+        return loss, preds, y
+
+    def training_step(self, batch, batch_idx):
+        loss, preds, targets = self.model_step(batch, "train")
+
+        return {"loss": loss, "preds": preds, "targets": targets}
+
     def validation_step(self, batch, batch_idx):
-        self.evaluate(batch, "val")
+        self.model_step(batch, "val")
 
     def test_step(self, batch, batch_idx):
-        self.evaluate(batch, "test")
+        self.model_step(batch, "test")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(
-            self.parameters(),
-            lr=self.hparams.lr,
-            momentum=0.9,
-            weight_decay=5e-4,
-        )
+        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.hparams.scheduler:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val/loss",
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
         return {"optimizer": optimizer}
-        
