@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import pytorch_lightning as pl
@@ -30,11 +29,13 @@ class LitModule(pl.LightningModule):
         # loss function
         self.criterion = torch.nn.CrossEntropyLoss()
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         out = self.model(x)
         return out
 
-    def model_step(self, batch, stage=None):
+    def model_step(
+        self, batch, stage=None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y)
@@ -47,7 +48,7 @@ class LitModule(pl.LightningModule):
 
         return loss, preds, y
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx) -> dict:
         loss, preds, targets = self.model_step(batch, "train")
 
         return {"loss": loss, "preds": preds, "targets": targets}
@@ -58,7 +59,7 @@ class LitModule(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         self.model_step(batch, "test")
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> dict:
         optimizer = self.hparams.optimizer(params=self.parameters())
         if self.hparams.scheduler:
             scheduler = self.hparams.scheduler(optimizer=optimizer)

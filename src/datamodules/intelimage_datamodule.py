@@ -1,3 +1,8 @@
+if __name__ == "__main__":
+    import pyrootutils
+
+    root = pyrootutils.setup_root(__file__, pythonpath=True)
+
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -10,11 +15,6 @@ from albumentations.pytorch import ToTensorV2
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import ImageFolder
-
-if __name__ == "__main__":
-    import pyrootutils
-
-    root = pyrootutils.setup_root(__file__, pythonpath=True)
 
 from src.utils import extract_archive, write_dataset
 
@@ -80,15 +80,15 @@ class IntelImgClfDataModule(pl.LightningDataModule):
         self.data_val: Optional[Dataset] = None
 
     @property
-    def num_classes(self):
+    def num_classes(self) -> int:
         return len(self.data_train.classes)
 
     @property
-    def classes(self):
+    def classes(self) -> list:
         return self.data_train.classes
 
     @property
-    def idx_to_class(self):
+    def idx_to_class(self) -> dict:
         return {k: v for v, k in self.data_train.class_to_idx.items()}
 
     def prepare_data(self):
@@ -147,7 +147,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
 
             self.data_train, self.data_test, self.data_val = trainset, testset, valset
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=IntelImageDataset(self.data_train, self.train_transforms),
             batch_size=self.hparams.batch_size,
@@ -156,7 +156,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
             shuffle=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=IntelImageDataset(self.data_val, self.test_transforms),
             batch_size=self.hparams.batch_size,
@@ -165,7 +165,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
             shuffle=False,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=IntelImageDataset(self.data_test, self.test_transforms),
             batch_size=self.hparams.batch_size,
