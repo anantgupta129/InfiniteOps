@@ -58,6 +58,10 @@ class IntelImgClfDataModule(pl.LightningDataModule):
     def classes(self):
         return self.data_train.classes
 
+    @property
+    def idx_to_class(self):
+        return {k: v for v, k in self.data_train.class_to_idx.items()}
+
     def prepare_data(self):
         """Download data if needed.
         Do not use it to assign state (self.x = y).
@@ -160,3 +164,4 @@ if __name__ == "__main__":
     datamodule = IntelImgClfDataModule()
     datamodule.prepare_data()
     datamodule.setup()
+    print(datamodule.idx_to_class)
