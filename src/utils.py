@@ -7,10 +7,11 @@ import pathlib
 import shutil
 import tarfile
 import zipfile
-from typing import (IO, Any, Callable, Dict, Optional, Tuple)
+from typing import IO, Any, Callable, Dict, Optional, Tuple
 from pathlib import Path
 
 from tqdm import tqdm
+
 
 def _extract_tar(from_path: str, to_path: str, compression: Optional[str]) -> None:
     with tarfile.open(from_path, f"r:{compression[1:]}" if compression else "r") as tar:
