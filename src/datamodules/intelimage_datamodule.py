@@ -2,11 +2,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import albumentations as A
+import numpy as np
 import pytorch_lightning as pl
 import torchvision.transforms as T
+from albumentations.pytorch import ToTensorV2
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import ImageFolder
-from sklearn.model_selection import train_test_split
 
 if __name__ == "__main__":
     import pyrootutils
@@ -14,6 +17,23 @@ if __name__ == "__main__":
     root = pyrootutils.setup_root(__file__, pythonpath=True)
 
 from src.utils import extract_archive, write_dataset
+
+
+class IntelImageDataset(Dataset):
+    def __init__(self, data, transform=None):
+        self.data = data
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        image, label = self.data[idx]
+
+        if self.transform:
+            image = self.transform(image=np.array(image))["image"]
+
+        return image, label
 
 
 class IntelImgClfDataModule(pl.LightningDataModule):
@@ -38,11 +58,20 @@ class IntelImgClfDataModule(pl.LightningDataModule):
         self.dataset_extracted.mkdir(parents=True, exist_ok=True)
 
         # data transformations
-        self.transforms = T.Compose(
+        self.train_transforms = A.Compose(
             [
-                T.ToTensor(),
-                T.Resize((224, 224)),
-                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                A.Rotate(limit=5, interpolation=1, border_mode=4),
+                A.HorizontalFlip(),
+                A.CoarseDropout(2, 8, 8, 1, 8, 8),
+                A.RandomBrightnessContrast(brightness_limit=1.5, contrast_limit=0.9),
+                A.Normalize(mean=(0.491, 0.482, 0.446), std=(0.247, 0.243, 0.261)),
+                ToTensorV2(),
+            ]
+        )
+        self.test_transforms = A.Compose(
+            [
+                A.Normalize(mean=(0.491, 0.482, 0.446), std=(0.247, 0.243, 0.261)),
+                ToTensorV2(),
             ]
         )
 
@@ -112,17 +141,15 @@ class IntelImgClfDataModule(pl.LightningDataModule):
         """
         # load and split datasets only if not loaded already
         if not self.data_train and not self.data_test:
-            trainset = ImageFolder(
-                self.dataset_dir / "train", transform=self.transforms
-            )
-            testset = ImageFolder(self.dataset_dir / "test", transform=self.transforms)
-            valset = ImageFolder(self.dataset_dir / "val", transform=self.transforms)
+            trainset = ImageFolder(self.dataset_dir / "train")
+            testset = ImageFolder(self.dataset_dir / "test")
+            valset = ImageFolder(self.dataset_dir / "val")
 
             self.data_train, self.data_test, self.data_val = trainset, testset, valset
 
     def train_dataloader(self):
         return DataLoader(
-            dataset=self.data_train,
+            dataset=IntelImageDataset(self.data_train, self.train_transforms),
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -131,7 +158,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            dataset=self.data_val,
+            dataset=IntelImageDataset(self.data_val, self.test_transforms),
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -140,7 +167,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            dataset=self.data_test,
+            dataset=IntelImageDataset(self.data_test, self.test_transforms),
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -165,3 +192,8 @@ if __name__ == "__main__":
     datamodule.prepare_data()
     datamodule.setup()
     print(datamodule.idx_to_class)
+
+    for batch in datamodule.train_dataloader():
+        x, y = batch
+        print(x.shape, y.shape)
+        break
