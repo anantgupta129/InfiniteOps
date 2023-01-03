@@ -60,6 +60,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
         # data transformations
         self.train_transforms = A.Compose(
             [
+                A.Resize(256, 256),
                 A.Rotate(limit=5, interpolation=1, border_mode=4),
                 A.HorizontalFlip(),
                 A.CoarseDropout(2, 8, 8, 1, 8, 8),
@@ -70,6 +71,7 @@ class IntelImgClfDataModule(pl.LightningDataModule):
         )
         self.test_transforms = A.Compose(
             [
+                A.Resize(256, 256),
                 A.Normalize(mean=(0.491, 0.482, 0.446), std=(0.247, 0.243, 0.261)),
                 ToTensorV2(),
             ]
@@ -188,7 +190,22 @@ class IntelImgClfDataModule(pl.LightningDataModule):
 
 
 if __name__ == "__main__":
-    datamodule = IntelImgClfDataModule()
+    # datamodule = IntelImgClfDataModule()
+    # datamodule.prepare_data()
+    # datamodule.setup()
+    # print(datamodule.idx_to_class)
+
+    # for batch in datamodule.train_dataloader():
+    #     x, y = batch
+    #     print(x.shape, y.shape)
+    #     break
+
+    import hydra
+    import omegaconf
+
+    cfg = omegaconf.OmegaConf.load(root / "configs" / "datamodule" / "image.yaml")
+    cfg.root_data_dir = str(root / "data")
+    datamodule = hydra.utils.instantiate(cfg)
     datamodule.prepare_data()
     datamodule.setup()
     print(datamodule.idx_to_class)
@@ -197,3 +214,4 @@ if __name__ == "__main__":
         x, y = batch
         print(x.shape, y.shape)
         break
+
