@@ -9,10 +9,31 @@ import shutil
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import IO, Any, Callable, Dict, Optional, Tuple
+from typing import IO, Any, Callable, Dict, Optional, Tuple, List
 
+import hydra
+from omegaconf import DictConfig
+from pytorch_lightning import Callback
+from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
+
+
+def get_pylogger(name=__name__) -> logging.Logger:
+    """Initializes multi-GPU-friendly python command line logger."""
+
+    logger = logging.getLogger(name)
+
+    # this ensures all logging levels get marked with the rank zero decorator
+    # otherwise logs would get multiplied for each GPU process in multi-GPU setup
+    logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")
+    for level in logging_levels:
+        setattr(logger, level, rank_zero_only(getattr(logger, level)))
+
+    return logger
+
+
+log = get_pylogger(__name__)
 
 
 def _extract_tar(from_path: str, to_path: str, compression: Optional[str]) -> None:
@@ -170,18 +191,43 @@ def extract_archive(
 def write_dataset(image_paths, output_dir):
     for img_path in tqdm(image_paths):
         Path(output_dir / img_path.parent.stem).mkdir(parents=True, exist_ok=True)
-        shutil.move(img_path, output_dir / img_path.parent.stem / img_path.name)
+        shutil.copyfile(img_path, output_dir / img_path.parent.stem / img_path.name)
 
 
-def get_pylogger(name=__name__) -> logging.Logger:
-    """Initializes multi-GPU-friendly python command line logger."""
+def instantiate_callbacks(callbacks_cfg: DictConfig) -> List[Callback]:
+    """Instantiates callbacks from config."""
+    callbacks: List[Callback] = []
 
-    logger = logging.getLogger(name)
+    if not callbacks_cfg:
+        log.warning("No callback configs found! Skipping..")
+        return callbacks
 
-    # this ensures all logging levels get marked with the rank zero decorator
-    # otherwise logs would get multiplied for each GPU process in multi-GPU setup
-    logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")
-    for level in logging_levels:
-        setattr(logger, level, rank_zero_only(getattr(logger, level)))
+    if not isinstance(callbacks_cfg, DictConfig):
+        raise TypeError("Callbacks config must be a DictConfig!")
+
+    for _, cb_conf in callbacks_cfg.items():
+        if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
+            log.info(f"Instantiating callback <{cb_conf._target_}>")
+            callbacks.append(hydra.utils.instantiate(cb_conf))
+
+    return callbacks
+
+
+def instantiate_loggers(logger_cfg: DictConfig) -> List[LightningLoggerBase]:
+    """Instantiates loggers from config."""
+    logger: List[LightningLoggerBase] = []
+
+    if not logger_cfg:
+        log.warning("No logger configs found! Skipping...")
+        return logger
+
+    if not isinstance(logger_cfg, DictConfig):
+        raise TypeError("Logger config must be a DictConfig!")
+
+    for _, lg_conf in logger_cfg.items():
+        if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
+            log.info(f"Instantiating logger <{lg_conf._target_}>")
+            logger.append(hydra.utils.instantiate(lg_conf))
 
     return logger
+
