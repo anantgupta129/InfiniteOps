@@ -10,3 +10,5 @@ tmp.py
 images/
 logs/
 data/**
+runs/
+**.log
