@@ -1,0 +1,5 @@
+_target_: src.datamodules.intelimage_datamodule.IntelImgClfDataModule
+root_data_dir: data
+batch_size: 32
+num_workers: 16
+pin_memory: False
