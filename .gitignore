@@ -12,3 +12,4 @@ logs/
 data/**
 runs/
 **.log
+*.ckpt
