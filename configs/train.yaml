@@ -4,7 +4,7 @@
 # order of defaults determines the order in which configs override each other
 defaults:
   - _self_
-  - datamodule: image.yaml
+  - datamodule: intel.yaml
   - model: timm.yaml
   - callbacks: default.yaml
   - logger: tensorboard # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
@@ -48,4 +48,4 @@ test: True
 ckpt_path: null
 
 # seed for random number generators in pytorch, numpy and python.random
-seed: 123
+seed: 129

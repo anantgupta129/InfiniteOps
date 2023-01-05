@@ -2,10 +2,11 @@ defaults:
   - model_checkpoint.yaml
   - early_stopping.yaml
   - model_summary.yaml
+  - rich_progress_bar.yaml
   - _self_
 
 model_checkpoint:
-  dirpath: runs/checkpoints
+  dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
   monitor: "val/acc"
   mode: "max"

@@ -1,8 +1,5 @@
 _target_: src.models.timm_module.LitModule
 
-model_name: resnet50d
-num_classes: 6
-
 optimizer:
   _target_: torch.optim.Adam
   _partial_: true
@@ -16,4 +13,8 @@ scheduler:
   factor: 0.1
   patience: 10
 
-  
+net:
+  _target_: timm.create_model
+  num_classes: 6
+  pretrained: true
+  model_name: resnet50d
