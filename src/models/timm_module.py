@@ -1,68 +1,121 @@
-import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, List
 
-import pytorch_lightning as pl
-import timm
 import torch
-import torch.nn.functional as F
+from pytorch_lightning import LightningModule
+from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 
 
-class LitModule(pl.LightningModule):
+class LitModule(LightningModule):
     def __init__(
         self,
-        model_name: str,
-        optimizer: torch.optim.Optimizer = None,
-        scheduler: torch.optim.lr_scheduler = None,
-        num_classes: int = 10,
+        net: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler,
     ):
         super().__init__()
 
-        self.save_hyperparameters()
-        self.num_classes = num_classes
-        self.model = timm.create_model(
-            model_name, pretrained=True, num_classes=num_classes
-        )
+        # this line allows to access init params with 'self.hparams' attribute
+        # also ensures init params will be stored in ckpt
+        self.save_hyperparameters(logger=False)
 
-        # accuracy
-        self.acc = Accuracy(task="multiclass", num_classes=num_classes)
+        self.net = net
+
         # loss function
         self.criterion = torch.nn.CrossEntropyLoss()
 
-    def forward(self, x) -> torch.Tensor:
-        out = self.model(x)
-        return out
+        # metric objects for calculating and averaging accuracy across batches
+        self.train_acc = Accuracy(task="multiclass", num_classes=6)
+        self.val_acc = Accuracy(task="multiclass", num_classes=6)
+        self.test_acc = Accuracy(task="multiclass", num_classes=6)
 
-    def model_step(
-        self, batch, stage=None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # for averaging loss across batches
+        self.train_loss = MeanMetric()
+        self.val_loss = MeanMetric()
+        self.test_loss = MeanMetric()
+
+        # for tracking best so far validation accuracy
+        self.val_acc_best = MaxMetric()
+
+    def forward(self, x: torch.Tensor):
+        return self.net(x)
+
+    def on_train_start(self):
+        # by default lightning executes validation step sanity checks before training starts,
+        # so we need to make sure val_acc_best doesn't store accuracy from these checks
+        self.val_acc_best.reset()
+
+    def model_step(self, batch: Any):
         x, y = batch
-        logits = self(x)
+        logits = self.forward(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
-        acc = self.acc(preds, y)
-
-        if stage:
-            self.log(f"{stage}/loss", loss, prog_bar=True)
-            self.log(f"{stage}/acc", acc, prog_bar=True)
-
         return loss, preds, y
 
-    def training_step(self, batch, batch_idx) -> dict:
-        loss, preds, targets = self.model_step(batch, "train")
+    def training_step(self, batch: Any, batch_idx: int):
+        loss, preds, targets = self.model_step(batch)
+
+        # update and log metrics
+        self.train_loss(loss)
+        self.train_acc(preds, targets)
+        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        
+        return {"loss": loss, "preds": preds, "targets": targets}
+
+    def training_epoch_end(self, outputs: List[Any]):
+        # `outputs` is a list of dicts returned from `training_step()`
+
+        # Warning: when overriding `training_epoch_end()`, lightning accumulates outputs from all batches of the epoch
+        # this may not be an issue when training on mnist
+        # but on larger datasets/models it's easy to run into out-of-memory errors
+
+        # consider detaching tensors before returning them from `training_step()`
+        # or using `on_train_epoch_end()` instead which doesn't accumulate outputs
+
+        pass
+
+    def validation_step(self, batch: Any, batch_idx: int):
+        loss, preds, targets = self.model_step(batch)
+
+        # update and log metrics
+        self.val_loss(loss)
+        self.val_acc(preds, targets)
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         return {"loss": loss, "preds": preds, "targets": targets}
 
-    def validation_step(self, batch, batch_idx):
-        loss, preds, y = self.model_step(batch, "val")
-        self.logger.log_hyperparams(vars(self.hparams), metrics={"hp_metric": loss})
-        
-    def test_step(self, batch, batch_idx):
-        self.model_step(batch, "test")
+    def validation_epoch_end(self, outputs: List[Any]):
+        acc = self.val_acc.compute()  # get current val acc
+        self.val_acc_best(acc)  # update best so far val acc
+        # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
+        # otherwise metric would be reset by lightning after each epoch
+        self.log("val/acc_best", self.val_acc_best.compute(), prog_bar=True)
 
-    def configure_optimizers(self) -> dict:
+    def test_step(self, batch: Any, batch_idx: int):
+        loss, preds, targets = self.model_step(batch)
+
+        # update and log metrics
+        self.test_loss(loss)
+        self.test_acc(preds, targets)
+        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        return {"loss": loss, "preds": preds, "targets": targets}
+
+    def test_epoch_end(self, outputs: List[Any]):
+        pass
+
+    def configure_optimizers(self):
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        Examples:
+            https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
+        """
         optimizer = self.hparams.optimizer(params=self.parameters())
-        if self.hparams.scheduler:
+        if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {
                 "optimizer": optimizer,
@@ -74,3 +127,13 @@ class LitModule(pl.LightningModule):
                 },
             }
         return {"optimizer": optimizer}
+
+
+if __name__ == "__main__":
+    import hydra
+    import omegaconf
+    import pyrootutils
+
+    root = pyrootutils.setup_root(__file__, pythonpath=True)
+    cfg = omegaconf.OmegaConf.load(root / "configs" / "model" / "timm.yaml")
+    _ = hydra.utils.instantiate(cfg)
