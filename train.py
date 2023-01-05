@@ -15,6 +15,7 @@ from src import utils
 log = utils.get_pylogger(__name__)
 
 
+@utils.task_wrapper
 def train(cfg: DictConfig) -> Tuple[dict, dict]:
     """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
     training.
@@ -63,7 +64,7 @@ def train(cfg: DictConfig) -> Tuple[dict, dict]:
 
     if logger:
         log.info("Logging hyperparameters!")
-        log.info(str(object_dict))
+        utils.log_hyperparameters(object_dict)
 
     if cfg.get("train"):
         log.info("Starting training!")
@@ -93,6 +94,14 @@ def main(cfg: DictConfig) -> Optional[float]:
 
     # train the model
     metric_dict, _ = train(cfg)
+    
+    # safely retrieve metric value for hydra-based hyperparameter optimization
+    metric_value = utils.get_metric_value(
+        metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
+    )
+
+    # return optimized metric
+    return metric_value
 
 
 if __name__ == "__main__":
