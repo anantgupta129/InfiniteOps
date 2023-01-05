@@ -1,5 +1,4 @@
 .nfs*
-*.ipynb
 *.pyc
 .DS_Store
 *.pth
