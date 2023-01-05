@@ -12,8 +12,8 @@ class LitModule(pl.LightningModule):
     def __init__(
         self,
         model_name: str,
-        optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler,
+        optimizer: torch.optim.Optimizer = None,
+        scheduler: torch.optim.lr_scheduler = None,
         num_classes: int = 10,
     ):
         super().__init__()
@@ -54,8 +54,9 @@ class LitModule(pl.LightningModule):
         return {"loss": loss, "preds": preds, "targets": targets}
 
     def validation_step(self, batch, batch_idx):
-        self.model_step(batch, "val")
-
+        loss, preds, y = self.model_step(batch, "val")
+        self.logger.log_hyperparams(vars(self.hparams), metrics={"hp_metric": loss})
+        
     def test_step(self, batch, batch_idx):
         self.model_step(batch, "test")
 
