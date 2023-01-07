@@ -182,7 +182,7 @@ def write_dataset(image_paths, output_dir):
     for img_path in tqdm(image_paths):
         Path(output_dir / img_path.parent.stem).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(img_path, output_dir / img_path.parent.stem / img_path.name)
-        
+
 
 def task_wrapper(task_func: Callable) -> Callable:
     """Optional decorator that wraps the task function in extra utilities.

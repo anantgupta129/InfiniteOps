@@ -58,9 +58,13 @@ class LitModule(LightningModule):
         # update and log metrics
         self.train_loss(loss)
         self.train_acc(preds, targets)
-        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-        
+        self.log(
+            "train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True
+        )
+        self.log(
+            "train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True
+        )
+
         return {"loss": loss, "preds": preds, "targets": targets}
 
     def training_epoch_end(self, outputs: List[Any]):
@@ -92,6 +96,9 @@ class LitModule(LightningModule):
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), prog_bar=True)
+        self.logger.log_hyperparams(
+            vars(self.hparams), metrics={"hp_metric": self.val_loss.compute()}
+        )
 
     def test_step(self, batch: Any, batch_idx: int):
         loss, preds, targets = self.model_step(batch)
@@ -99,7 +106,9 @@ class LitModule(LightningModule):
         # update and log metrics
         self.test_loss(loss)
         self.test_acc(preds, targets)
-        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
+        )
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         return {"loss": loss, "preds": preds, "targets": targets}
