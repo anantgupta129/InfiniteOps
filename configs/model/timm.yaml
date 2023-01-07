@@ -7,11 +7,11 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _target_: torch.optim.lr_scheduler.OneCycleLR
   _partial_: true
-  mode: min
-  factor: 0.1
-  patience: 10
+  epochs: ${trainer.max_epochs}
+  max_lr: 0.01
+  steps_per_epoch: 64
 
 net:
   _target_: timm.create_model
