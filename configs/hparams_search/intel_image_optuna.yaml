@@ -45,7 +45,8 @@ hydra:
 
     # define hyperparameter search space
     params:
+      model.net.model_name: choice(efficientnet_b3a, resnet50d, mobilenetv2_120d)
       model.optimizer._target_: choice(torch.optim.AdamW, torch.optim.SGD, torch.optim.RMSprop, torch.optim.Adam)
-      # model.optimizer.lr: interval(0.0001, 0.01)
-
-      # datamodule.batch_size: choice(32, 64, 128, 256)
+      model.optimizer.lr: interval(0.0001, 0.01)
+      model.optimizer.weight_decay: choice(0, 0.01, 0.1)
+      datamodule.batch_size: choice(32, 64)
