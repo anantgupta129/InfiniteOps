@@ -203,7 +203,7 @@ if __name__ == "__main__":
     import hydra
     import omegaconf
 
-    cfg = omegaconf.OmegaConf.load(root / "configs" / "datamodule" / "image.yaml")
+    cfg = omegaconf.OmegaConf.load(root / "configs" / "datamodule" / "intel.yaml")
     cfg.root_data_dir = str(root / "data")
     datamodule = hydra.utils.instantiate(cfg)
     datamodule.prepare_data()
@@ -214,4 +214,3 @@ if __name__ == "__main__":
         x, y = batch
         print(x.shape, y.shape)
         break
-
