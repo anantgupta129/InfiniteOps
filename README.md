@@ -15,7 +15,7 @@ Description
     - Recall
     - onfusion Matrix (Can be Image in Tensorboard)
 
-All the logs has been logged to the Tensorboard
+All the logs has been [logged to the Tensorboard](https://tensorboard.dev/experiment/d31Ngs04Q2SMmee3exgvXQ/#scalars)
 
 ![](images/2.png)
 ![](images/3.png)
