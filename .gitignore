@@ -6,9 +6,11 @@
 .vscode
 temp.py
 tmp.py
-images/
 logs/
-data/**
+data/
 runs/
+
 **.log
 *.ckpt
+**.jpg
+**.zip
