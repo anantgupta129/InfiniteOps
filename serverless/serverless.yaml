@@ -1,0 +1,16 @@
+service: serverless-intel
+ 
+provider:
+  name: aws #cloud provider
+  region: ap-south-1 #region (mumbai)
+  memorySize: 3008 #memory usage
+  timeout: 300 
+ 
+functions:
+  intel: 
+    image: 294495367161.dkr.ecr.ap-south-1.amazonaws.com/intel-serverless:latest
+    events:
+      - http:
+          path: inference 
+          method: post 
+          cors: true
