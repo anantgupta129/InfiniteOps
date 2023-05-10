@@ -1,0 +1,383 @@
+import bz2
+import gzip
+import logging
+import lzma
+import os
+import os.path
+import pathlib
+import shutil
+import tarfile
+import time
+import warnings
+import zipfile
+from importlib.util import find_spec
+from pathlib import Path
+from typing import IO, Any, Callable, Dict, List, Optional, Tuple
+
+import hydra
+from omegaconf import DictConfig
+from pytorch_lightning import Callback
+from pytorch_lightning.loggers import LightningLoggerBase
+from pytorch_lightning.utilities import rank_zero_only
+from tqdm import tqdm
+
+from src.utils import pylogger, rich_utils
+
+log = pylogger.get_pylogger(__name__)
+
+
+def _extract_tar(from_path: str, to_path: str, compression: Optional[str]) -> None:
+    with tarfile.open(from_path, f"r:{compression[1:]}" if compression else "r") as tar:
+        tar.extractall(to_path)
+
+
+_ZIP_COMPRESSION_MAP: Dict[str, int] = {
+    ".bz2": zipfile.ZIP_BZIP2,
+    ".xz": zipfile.ZIP_LZMA,
+}
+
+
+def _extract_zip(from_path: str, to_path: str, compression: Optional[str]) -> None:
+    with zipfile.ZipFile(
+        from_path,
+        "r",
+        compression=_ZIP_COMPRESSION_MAP[compression]
+        if compression
+        else zipfile.ZIP_STORED,
+    ) as zip:
+        zip.extractall(to_path)
+
+
+_ARCHIVE_EXTRACTORS: Dict[str, Callable[[str, str, Optional[str]], None]] = {
+    ".tar": _extract_tar,
+    ".zip": _extract_zip,
+}
+_COMPRESSED_FILE_OPENERS: Dict[str, Callable[..., IO]] = {
+    ".bz2": bz2.open,
+    ".gz": gzip.open,
+    ".xz": lzma.open,
+}
+_FILE_TYPE_ALIASES: Dict[str, Tuple[Optional[str], Optional[str]]] = {
+    ".tbz": (".tar", ".bz2"),
+    ".tbz2": (".tar", ".bz2"),
+    ".tgz": (".tar", ".gz"),
+}
+
+
+def _detect_file_type(file: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """Detect the archive type and/or compression of a file.
+    Args:
+        file (str): the filename
+    Returns:
+        (tuple): tuple of suffix, archive type, and compression
+    Raises:
+        RuntimeError: if file has no suffix or suffix is not supported
+    """
+    suffixes = pathlib.Path(file).suffixes
+    if not suffixes:
+        raise RuntimeError(
+            f"File '{file}' has no suffixes that could be used to detect the archive type and compression."
+        )
+    suffix = suffixes[-1]
+
+    # check if the suffix is a known alias
+    if suffix in _FILE_TYPE_ALIASES:
+        return (suffix, *_FILE_TYPE_ALIASES[suffix])
+
+    # check if the suffix is an archive type
+    if suffix in _ARCHIVE_EXTRACTORS:
+        return suffix, suffix, None
+
+    # check if the suffix is a compression
+    if suffix in _COMPRESSED_FILE_OPENERS:
+        # check for suffix hierarchy
+        if len(suffixes) > 1:
+            suffix2 = suffixes[-2]
+
+            # check if the suffix2 is an archive type
+            if suffix2 in _ARCHIVE_EXTRACTORS:
+                return suffix2 + suffix, suffix2, suffix
+
+        return suffix, None, suffix
+
+    valid_suffixes = sorted(
+        set(_FILE_TYPE_ALIASES)
+        | set(_ARCHIVE_EXTRACTORS)
+        | set(_COMPRESSED_FILE_OPENERS)
+    )
+    raise RuntimeError(
+        f"Unknown compression or archive type: '{suffix}'.\nKnown suffixes are: '{valid_suffixes}'."
+    )
+
+
+def _decompress(
+    from_path: str, to_path: Optional[str] = None, remove_finished: bool = False
+) -> str:
+    r"""Decompress a file.
+    The compression is automatically detected from the file name.
+    Args:
+        from_path (str): Path to the file to be decompressed.
+        to_path (str): Path to the decompressed file. If omitted, ``from_path`` without compression extension is used.
+        remove_finished (bool): If ``True``, remove the file after the extraction.
+    Returns:
+        (str): Path to the decompressed file.
+    """
+    suffix, archive_type, compression = _detect_file_type(from_path)
+    if not compression:
+        raise RuntimeError(f"Couldn't detect a compression from suffix {suffix}.")
+
+    if to_path is None:
+        to_path = from_path.replace(
+            suffix, archive_type if archive_type is not None else ""
+        )
+
+    # We don't need to check for a missing key here, since this was already done in _detect_file_type()
+    compressed_file_opener = _COMPRESSED_FILE_OPENERS[compression]
+
+    with compressed_file_opener(from_path, "rb") as rfh, open(to_path, "wb") as wfh:
+        wfh.write(rfh.read())
+
+    if remove_finished:
+        os.remove(from_path)
+
+    return to_path
+
+
+def extract_archive(
+    from_path: str, to_path: Optional[str] = None, remove_finished: bool = False
+) -> str:
+    """Extract an archive.
+    The archive type and a possible compression is automatically detected from the file name. If the file is compressed
+    but not an archive the call is dispatched to :func:`decompress`.
+    Args:
+        from_path (str): Path to the file to be extracted.
+        to_path (str): Path to the directory the file will be extracted to. If omitted, the directory of the file is
+            used.
+        remove_finished (bool): If ``True``, remove the file after the extraction.
+    Returns:
+        (str): Path to the directory the file was extracted to.
+    """
+    if to_path is None:
+        to_path = os.path.dirname(from_path)
+
+    suffix, archive_type, compression = _detect_file_type(from_path)
+    if not archive_type:
+        return _decompress(
+            from_path,
+            os.path.join(to_path, os.path.basename(from_path).replace(suffix, "")),
+            remove_finished=remove_finished,
+        )
+
+    # We don't need to check for a missing key here, since this was already done in _detect_file_type()
+    extractor = _ARCHIVE_EXTRACTORS[archive_type]
+
+    extractor(from_path, to_path, compression)
+    if remove_finished:
+        os.remove(from_path)
+
+    return to_path
+
+
+def write_dataset(image_paths, output_dir):
+    for img_path in tqdm(image_paths):
+        Path(output_dir / img_path.parent.stem).mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(img_path, output_dir / img_path.parent.stem / img_path.name)
+
+
+def task_wrapper(task_func: Callable) -> Callable:
+    """Optional decorator that wraps the task function in extra utilities.
+
+    Makes multirun more resistant to failure.
+
+    Utilities:
+    - Calling the `utils.extras()` before the task is started
+    - Calling the `utils.close_loggers()` after the task is finished or failed
+    - Logging the exception if occurs
+    - Logging the output dir
+    """
+
+    def wrap(cfg: DictConfig):
+
+        # execute the task
+        try:
+
+            # apply extra utilities
+            extras(cfg)
+
+            metric_dict, object_dict = task_func(cfg=cfg)
+
+        # things to do if exception occurs
+        except Exception as ex:
+
+            # save exception to `.log` file
+            log.exception("")
+
+            # when using hydra plugins like Optuna, you might want to disable raising exception
+            # to avoid multirun failure
+            raise ex
+
+        # things to always do after either success or exception
+        finally:
+
+            # display output dir path in terminal
+            log.info(f"Output dir: {cfg.paths.output_dir}")
+
+            # close loggers (even if exception occurs so multirun won't fail)
+            close_loggers()
+
+        return metric_dict, object_dict
+
+    return wrap
+
+
+def extras(cfg: DictConfig) -> None:
+    """Applies optional utilities before the task is started.
+
+    Utilities:
+    - Ignoring python warnings
+    - Setting tags from command line
+    - Rich config printing
+    """
+
+    # return if no `extras` config
+    if not cfg.get("extras"):
+        log.warning("Extras config not found! <cfg.extras=null>")
+        return
+
+    # disable python warnings
+    if cfg.extras.get("ignore_warnings"):
+        log.info("Disabling python warnings! <cfg.extras.ignore_warnings=True>")
+        warnings.filterwarnings("ignore")
+
+    # prompt user to input tags from command line if none are provided in the config
+    if cfg.extras.get("enforce_tags"):
+        log.info("Enforcing tags! <cfg.extras.enforce_tags=True>")
+        rich_utils.enforce_tags(cfg, save_to_file=True)
+
+    # pretty print config tree using Rich library
+    if cfg.extras.get("print_config"):
+        log.info("Printing config tree with Rich! <cfg.extras.print_config=True>")
+        rich_utils.print_config_tree(cfg, resolve=True, save_to_file=True)
+
+
+def instantiate_callbacks(callbacks_cfg: DictConfig) -> List[Callback]:
+    """Instantiates callbacks from config."""
+    callbacks: List[Callback] = []
+
+    if not callbacks_cfg:
+        log.warning("No callback configs found! Skipping..")
+        return callbacks
+
+    if not isinstance(callbacks_cfg, DictConfig):
+        raise TypeError("Callbacks config must be a DictConfig!")
+
+    for _, cb_conf in callbacks_cfg.items():
+        if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
+            log.info(f"Instantiating callback <{cb_conf._target_}>")
+            callbacks.append(hydra.utils.instantiate(cb_conf))
+
+    return callbacks
+
+
+def instantiate_loggers(logger_cfg: DictConfig) -> List[LightningLoggerBase]:
+    """Instantiates loggers from config."""
+    logger: List[LightningLoggerBase] = []
+
+    if not logger_cfg:
+        log.warning("No logger configs found! Skipping...")
+        return logger
+
+    if not isinstance(logger_cfg, DictConfig):
+        raise TypeError("Logger config must be a DictConfig!")
+
+    for _, lg_conf in logger_cfg.items():
+        if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
+            log.info(f"Instantiating logger <{lg_conf._target_}>")
+            logger.append(hydra.utils.instantiate(lg_conf))
+
+    return logger
+
+
+@rank_zero_only
+def log_hyperparameters(object_dict: dict) -> None:
+    """Controls which config parts are saved by lightning loggers.
+
+    Additionally saves:
+    - Number of model parameters
+    """
+
+    hparams = {}
+
+    cfg = object_dict["cfg"]
+    model = object_dict["model"]
+    trainer = object_dict["trainer"]
+
+    if not trainer.logger:
+        log.warning("Logger not found! Skipping hyperparameter logging...")
+        return
+
+    hparams["model"] = cfg["model"]
+
+    # save number of model parameters
+    hparams["model/params/total"] = sum(p.numel() for p in model.parameters())
+    hparams["model/params/trainable"] = sum(
+        p.numel() for p in model.parameters() if p.requires_grad
+    )
+    hparams["model/params/non_trainable"] = sum(
+        p.numel() for p in model.parameters() if not p.requires_grad
+    )
+
+    hparams["datamodule"] = cfg["datamodule"]
+    hparams["trainer"] = cfg["trainer"]
+
+    hparams["callbacks"] = cfg.get("callbacks")
+    hparams["extras"] = cfg.get("extras")
+
+    hparams["task_name"] = cfg.get("task_name")
+    hparams["tags"] = cfg.get("tags")
+    hparams["ckpt_path"] = cfg.get("ckpt_path")
+    hparams["seed"] = cfg.get("seed")
+
+    # send hparams to all loggers
+    for logger in trainer.loggers:
+        logger.log_hyperparams(hparams)
+
+
+def get_metric_value(metric_dict: dict, metric_name: str) -> float:
+    """Safely retrieves value of the metric logged in LightningModule."""
+
+    if not metric_name:
+        log.info("Metric name is None! Skipping metric value retrieval...")
+        return None
+
+    if metric_name not in metric_dict:
+        raise Exception(
+            f"Metric value not found! <metric_name={metric_name}>\n"
+            "Make sure metric name logged in LightningModule is correct!\n"
+            "Make sure `optimized_metric` name in `hparams_search` config is correct!"
+        )
+
+    metric_value = metric_dict[metric_name].item()
+    log.info(f"Retrieved metric value! <{metric_name}={metric_value}>")
+
+    return metric_value
+
+
+def close_loggers() -> None:
+    """Makes sure all loggers closed properly (prevents logging failure during multirun)."""
+
+    log.info("Closing loggers...")
+
+    if find_spec("wandb"):  # if wandb is installed
+        import wandb
+
+        if wandb.run:
+            log.info("Closing wandb!")
+            wandb.finish()
+
+
+@rank_zero_only
+def save_file(path: str, content: str) -> None:
+    """Save file in rank zero mode (only on one process in multi-GPU setup)."""
+    with open(path, "w+") as file:
+        file.write(content)

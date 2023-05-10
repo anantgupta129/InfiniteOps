@@ -1,0 +1,20 @@
+_target_: src.models.timm_module.LitModule
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.0052086233463775385
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  _partial_: true
+  epochs: ${trainer.max_epochs}
+  max_lr: 0.01
+  steps_per_epoch: 64
+
+net:
+  _target_: timm.create_model
+  num_classes: 6
+  pretrained: true
+  model_name: efficientnet_b3a

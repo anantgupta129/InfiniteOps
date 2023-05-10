@@ -1,0 +1,7 @@
+_target_: src.datamodules.intelimage_datamodule.IntelImgClfDataModule
+train_data_dir: data/intel/train
+test_data_dir: data/intel/test
+val_data_dir: data/intel/val
+batch_size: 32
+num_workers: 8
+pin_memory: False
